@@ -1,6 +1,6 @@
 # ⚡ CRYPTO TOOLBOX
 
-Une boîte à outils cryptographique complète avec une interface moderne style **terminal/hacker**.
+Une boîte à outils complète pour développeurs avec une interface moderne style **terminal/hacker**.
 
 ![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
@@ -15,69 +15,48 @@ Interface sombre style Matrix avec :
 - 💻 Police monospace (JetBrains Mono)
 - ✨ Effets glow et scanlines
 
-## 🛠️ Les 8 Outils
+## 🛠️ Les 16 Outils
 
-### 🔐 Password Generator
-Génération de mots de passe sécurisés avec :
-- Longueur personnalisable (4-128 caractères)
-- Options : majuscules, minuscules, chiffres, symboles
-- Exclusion de caractères spécifiques
-- Indicateur de force du mot de passe
-- Historique des générations
+### 🔐 Sécurité
 
-### 🔒 Hash Generator
-Calcul de hachages cryptographiques :
-- **MD5** - 128 bits (déprécié)
-- **SHA-1** - 160 bits (déprécié)
-- **SHA-256** - 256 bits (recommandé)
-- **SHA-512** - 512 bits (le plus sécurisé)
-- Affichage simultané de tous les hashes
+| Outil | Description |
+|-------|-------------|
+| **Password Generator** | Génération de mots de passe sécurisés (4-128 caractères), indicateur de force |
+| **Hash Generator** | MD5, SHA-1, SHA-256, SHA-512 avec affichage simultané |
+| **Encrypt / Decrypt** | AES-256, Triple DES, Rabbit, DES, RC4 avec indicateurs de sécurité |
+| **File Checksum** | Vérification d'intégrité MD5/SHA-256 via drag & drop |
 
-### 📝 Encode / Decode
-Encodage et décodage de données :
-- **Base64** - Binaire vers ASCII
-- **URL Encoding** - Caractères spéciaux pour URLs
-- **Hexadécimal** - Représentation hex des octets
+### 📝 Encodage
 
-### 🛡️ Encrypt / Decrypt
-Chiffrement symétrique avec plusieurs algorithmes :
-- **AES-256** - Standard mondial (recommandé)
-- **Triple DES (3DES)** - 168 bits
-- **Rabbit** - Chiffrement par flux rapide
-- **DES** - 56 bits (déprécié)
-- **RC4** - Stream cipher (déprécié)
+| Outil | Description |
+|-------|-------------|
+| **Encode / Decode** | Base64, URL encoding, Hexadécimal |
+| **JWT Decoder** | Décodage Header/Payload, détection d'expiration |
+| **QR Code Generator** | Thèmes personnalisés, export PNG/SVG, fond transparent |
 
-Indicateurs de sécurité pour chaque algorithme.
+### 📊 Données
 
-### 🎲 UUID Generator
-Génération d'identifiants uniques :
-- **UUID v1** - Basé sur timestamp
-- **UUID v4** - Complètement aléatoire (recommandé)
-- Génération en lot (jusqu'à 50)
-- Options : majuscules, sans tirets
+| Outil | Description |
+|-------|-------------|
+| **JSON Formatter** | Beautify, Minify, Validate, Sort Keys, vue Tree |
+| **UUID Generator** | UUID v1 (timestamp) et v4 (random), génération en lot |
+| **Timestamp Converter** | Unix ↔ Date avec références et raccourcis |
 
-### 📁 File Checksum
-Vérification d'intégrité des fichiers :
-- Calcul **MD5** et **SHA-256**
-- Drag & drop de fichiers
-- Vérification de hash existant
-- Traitement 100% local
+### ✏️ Texte
 
-### 🎫 JWT Decoder
-Analyse de JSON Web Tokens :
-- Décodage du **Header**
-- Décodage du **Payload**
-- Affichage de la **Signature**
-- Détection d'expiration du token
-- Formatage des timestamps
+| Outil | Description |
+|-------|-------------|
+| **Regex Tester** | Test en temps réel, highlighting, patterns courants |
+| **Text Diff** | Comparateur de textes avec highlighting des différences |
+| **Lorem Ipsum** | Générateur de texte placeholder (mots, phrases, paragraphes) |
 
-### 📱 QR Code Generator
-Création de QR codes personnalisés :
-- 6 thèmes de couleurs prédéfinis
-- Couleurs personnalisables
-- Taille ajustable (128-512px)
-- 4 niveaux de correction d'erreur
-- Téléchargement PNG
+### 🌐 Web & Système
+
+| Outil | Description |
+|-------|-------------|
+| **URL Parser** | Décomposition complète des URLs, gestion des paramètres |
+| **Color Converter** | HEX, RGB, HSL, HSV, CMYK avec preview |
+| **Cron Generator** | Expressions cron avec presets et explications en français |
 
 ## 🚀 Installation
 
@@ -111,36 +90,44 @@ Ouvrir [http://localhost:3000](http://localhost:3000) dans votre navigateur.
 - ✅ **100% local** - Aucune donnée n'est envoyée à un serveur
 - ✅ **Pas de tracking** - Aucun analytics ou cookie
 - ✅ **Open source** - Code vérifiable
-- ✅ **Crypto Web API** - Utilise les APIs natives du navigateur pour la génération aléatoire
+- ✅ **Crypto Web API** - Utilise les APIs natives du navigateur
 
 ## 📁 Structure du Projet
 
 ```
 app/
-├── page.tsx                 # Page d'accueil
+├── page.tsx                 # Page d'accueil (16 outils)
 ├── globals.css              # Thème terminal/Matrix
 ├── layout.tsx               # Layout principal
 ├── components/
-│   ├── Navbar.tsx           # Navigation
+│   ├── Navbar.tsx           # Navigation responsive
 │   ├── ToolCard.tsx         # Carte d'outil
 │   └── CopyButton.tsx       # Bouton copier
 └── tools/
-    ├── password/page.tsx    # Générateur de mots de passe
-    ├── hash/page.tsx        # Hachage
-    ├── encode/page.tsx      # Encodage/Décodage
-    ├── encrypt/page.tsx     # Chiffrement
-    ├── uuid/page.tsx        # Générateur UUID
-    ├── checksum/page.tsx    # Checksum fichiers
-    ├── jwt/page.tsx         # Décodeur JWT
-    └── qrcode/page.tsx      # Générateur QR Code
+    ├── password/            # Générateur de mots de passe
+    ├── hash/                # Hachage
+    ├── encode/              # Encodage/Décodage
+    ├── encrypt/             # Chiffrement
+    ├── uuid/                # Générateur UUID
+    ├── checksum/            # Checksum fichiers
+    ├── jwt/                 # Décodeur JWT
+    ├── qrcode/              # Générateur QR Code
+    ├── timestamp/           # Convertisseur Timestamp
+    ├── json/                # Formateur JSON
+    ├── regex/               # Testeur Regex
+    ├── color/               # Convertisseur Couleurs
+    ├── diff/                # Comparateur Texte
+    ├── url/                 # Parser URL
+    ├── lorem/               # Générateur Lorem Ipsum
+    └── cron/                # Générateur Cron
 ```
 
 ## 🎯 Scripts Disponibles
 
 ```bash
-npm run dev      # Serveur de développement
+npm run dev      # Serveur de développement (port 3000)
 npm run build    # Build de production
-npm run start    # Serveur de production
+npm run start    # Serveur de production (port 8001)
 npm run lint     # Vérification ESLint
 ```
 
