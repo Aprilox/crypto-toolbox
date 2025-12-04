@@ -96,7 +96,7 @@ export default function Navbar() {
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2 group shrink-0" onClick={() => setIsMenuOpen(false)}>
               <span className="text-xl">⚡</span>
-              <span className="text-foreground font-bold group-hover:text-glow transition-all hidden sm:inline">
+              <span className="text-foreground font-bold group-hover:text-glow transition-all text-sm sm:text-base">
                 CRYPTO<span className="text-accent">TOOLBOX</span>
               </span>
             </Link>
