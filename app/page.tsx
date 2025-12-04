@@ -3,51 +3,99 @@ import ToolCard from "./components/ToolCard";
 const tools = [
   {
     title: "Password Generator",
-    description: "Générez des mots de passe sécurisés avec options de longueur, caractères et exclusions personnalisables.",
+    description: "Générez des mots de passe sécurisés avec options de longueur, caractères et exclusions.",
     href: "/tools/password",
     icon: "🔐",
   },
   {
-    title: "Hash",
-    description: "Calculez les hachages MD5, SHA-1, SHA-256 et SHA-512 de vos textes instantanément.",
+    title: "Hash Generator",
+    description: "Calculez les hachages MD5, SHA-1, SHA-256 et SHA-512 de vos textes.",
     href: "/tools/hash",
     icon: "🔒",
   },
   {
     title: "Encode / Decode",
-    description: "Encodez et décodez en Base64, URL encoding et Hexadécimal facilement.",
+    description: "Encodez et décodez en Base64, URL encoding et Hexadécimal.",
     href: "/tools/encode",
     icon: "📝",
   },
   {
     title: "Encrypt / Decrypt",
-    description: "Chiffrez et déchiffrez vos données avec l'algorithme AES-256 et une clé personnalisée.",
+    description: "Chiffrez vos données avec AES-256, DES, TripleDES, Rabbit ou RC4.",
     href: "/tools/encrypt",
     icon: "🛡️",
   },
   {
     title: "UUID Generator",
-    description: "Générez des identifiants uniques UUID v1 (timestamp) et v4 (aléatoire) en lot.",
+    description: "Générez des identifiants uniques UUID v1 et v4 en lot.",
     href: "/tools/uuid",
     icon: "🎲",
   },
   {
     title: "File Checksum",
-    description: "Vérifiez l'intégrité de vos fichiers avec les checksums MD5 et SHA-256 via drag & drop.",
+    description: "Vérifiez l'intégrité de vos fichiers avec MD5 et SHA-256.",
     href: "/tools/checksum",
     icon: "📁",
   },
   {
     title: "JWT Decoder",
-    description: "Décodez et analysez vos JSON Web Tokens - header, payload et signature.",
+    description: "Décodez et analysez vos JSON Web Tokens.",
     href: "/tools/jwt",
     icon: "🎫",
   },
   {
     title: "QR Code Generator",
-    description: "Créez des QR codes personnalisés à partir de texte ou URL avec téléchargement PNG.",
+    description: "Créez des QR codes personnalisés avec export PNG/SVG.",
     href: "/tools/qrcode",
     icon: "📱",
+  },
+  {
+    title: "Timestamp Converter",
+    description: "Convertissez entre Unix timestamp et date lisible.",
+    href: "/tools/timestamp",
+    icon: "🕐",
+  },
+  {
+    title: "JSON Formatter",
+    description: "Formatez, minifiez et validez votre JSON.",
+    href: "/tools/json",
+    icon: "📋",
+  },
+  {
+    title: "Regex Tester",
+    description: "Testez vos expressions régulières en temps réel.",
+    href: "/tools/regex",
+    icon: "🔍",
+  },
+  {
+    title: "Color Converter",
+    description: "Convertissez entre HEX, RGB, HSL, HSV et CMYK.",
+    href: "/tools/color",
+    icon: "🎨",
+  },
+  {
+    title: "Text Diff",
+    description: "Comparez deux textes et visualisez les différences.",
+    href: "/tools/diff",
+    icon: "📊",
+  },
+  {
+    title: "URL Parser",
+    description: "Décomposez et analysez les URLs en détail.",
+    href: "/tools/url",
+    icon: "🌐",
+  },
+  {
+    title: "Lorem Ipsum",
+    description: "Générez du texte placeholder pour vos maquettes.",
+    href: "/tools/lorem",
+    icon: "📄",
+  },
+  {
+    title: "Cron Generator",
+    description: "Générez et comprenez les expressions cron pour vos tâches planifiées.",
+    href: "/tools/cron",
+    icon: "⏰",
   },
 ];
 
@@ -71,18 +119,18 @@ export default function Home() {
           </h1>
           
           <p className="text-foreground/60 text-lg sm:text-xl max-w-2xl mx-auto mb-4">
-            <span className="text-accent">&gt;</span> Boîte à outils cryptographique complète
+            <span className="text-accent">&gt;</span> Boîte à outils complète pour développeurs
             <span className="cursor-blink"></span>
           </p>
           
           <p className="text-foreground/40 text-sm max-w-xl mx-auto">
-            Générateur de mots de passe, hachage, chiffrement, encodage, UUID, checksums, JWT et QR codes.
-            Tous les outils essentiels pour la sécurité et le développement.
+            {tools.length} outils essentiels : cryptographie, encodage, formatage et utilitaires.
+            100% local, aucune donnée envoyée.
           </p>
         </div>
 
         {/* Tools Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {tools.map((tool, index) => (
             <ToolCard
               key={tool.href}
