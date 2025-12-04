@@ -22,7 +22,7 @@ export default function RegexTool() {
     { flag: "s", label: "DotAll", description: ". inclut \\n" },
   ];
 
-  const { regex, error, matches, highlightedText, replacedText } = useMemo(() => {
+  const { error, matches, highlightedText, replacedText } = useMemo(() => {
     if (!pattern) {
       return { regex: null, error: null, matches: [], highlightedText: testString, replacedText: "" };
     }

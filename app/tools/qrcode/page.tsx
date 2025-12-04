@@ -409,6 +409,7 @@ export default function QRCodeTool() {
             style={{ backgroundColor: transparentBg ? undefined : lightColor }}
           >
             {qrDataUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
               <img 
                 src={qrDataUrl} 
                 alt="QR Code" 

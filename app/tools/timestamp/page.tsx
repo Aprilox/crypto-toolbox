@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import CopyButton from "@/app/components/CopyButton";
 
 export default function TimestampTool() {
   const [unixTimestamp, setUnixTimestamp] = useState("");

@@ -121,7 +121,9 @@ export default function CronTool() {
     return parts.join(", ");
   }, [minute, hour, dayOfMonth, month, dayOfWeek]);
 
-  const getNextExecutions = useMemo(() => {
+  // Fonction pour calculer les prochaines exécutions (pour usage futur)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _getNextExecutions = useMemo(() => {
     // Simplified next executions (not 100% accurate for complex crons)
     const executions: Date[] = [];
     const now = new Date();

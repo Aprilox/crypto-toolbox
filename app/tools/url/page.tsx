@@ -51,7 +51,8 @@ export default function UrlTool() {
     }
   }, [url]);
 
-  const buildUrl = (modifications: Partial<ParsedUrl> = {}): string => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _buildUrl = (modifications: Partial<ParsedUrl> = {}): string => {
     if (!parsed) return "";
     
     try {
@@ -187,7 +188,7 @@ export default function UrlTool() {
                 </div>
                 <div className="font-mono text-sm whitespace-nowrap">
                   <span className="text-purple-400">{parsed.protocol}</span>
-                  <span className="text-foreground/40">//</span>
+                  <span className="text-foreground/40">{"//"}</span>
                   <span className="text-cyan-400">{parsed.hostname}</span>
                   {parsed.port && <span className="text-yellow-400">:{parsed.port}</span>}
                   <span className="text-green-400">{parsed.pathname}</span>

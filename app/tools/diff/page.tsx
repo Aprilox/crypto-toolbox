@@ -44,7 +44,6 @@ export default function DiffTool() {
     };
 
     const buildDiff = (a: string[], b: string[], dp: number[][]): DiffLine[] => {
-      const result: DiffLine[] = [];
       let i = a.length;
       let j = b.length;
       let leftLine = a.length;
