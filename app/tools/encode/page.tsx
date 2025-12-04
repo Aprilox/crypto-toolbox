@@ -120,7 +120,7 @@ export default function EncodeTool() {
         {/* Encoding Selection */}
         <div className="card mb-6">
           <h2 className="text-lg font-bold text-accent mb-4">Type d&apos;encodage</h2>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {encodingOptions.map((option) => (
               <button
                 key={option.value}

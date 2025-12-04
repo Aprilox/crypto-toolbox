@@ -342,7 +342,7 @@ export default function QRCodeTool() {
           </div>
 
           {/* Custom Colors */}
-          <div className={`grid grid-cols-2 gap-4 ${transparentBg ? "opacity-50" : ""}`}>
+          <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${transparentBg ? "opacity-50" : ""}`}>
             <div>
               <label className="text-foreground/80 text-sm block mb-2">Couleur QR</label>
               <div className="flex gap-2">

@@ -281,7 +281,7 @@ export default function CronTool() {
         {/* Parse existing cron */}
         <div className="card mb-6">
           <h2 className="text-lg font-bold text-accent mb-3">📥 Importer une expression</h2>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={inputCron}
@@ -289,7 +289,7 @@ export default function CronTool() {
               placeholder="Ex: */15 * * * *"
               className="flex-1 font-mono"
             />
-            <button onClick={() => parseCron(inputCron)} className="btn">
+            <button onClick={() => parseCron(inputCron)} className="btn w-full sm:w-auto">
               Importer
             </button>
           </div>

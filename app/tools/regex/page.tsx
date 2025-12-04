@@ -125,23 +125,25 @@ export default function RegexTool() {
         {/* Pattern Input */}
         <div className="card mb-6">
           <label className="block text-foreground/80 mb-2">Expression régulière</label>
-          <div className="flex items-center gap-2">
-            <span className="text-foreground/40 text-xl">/</span>
-            <input
-              type="text"
-              value={pattern}
-              onChange={(e) => setPattern(e.target.value)}
-              placeholder="Votre regex ici..."
-              className="flex-1 font-mono"
-              spellCheck={false}
-            />
-            <span className="text-foreground/40 text-xl">/</span>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex items-center gap-2 flex-1">
+              <span className="text-foreground/40 text-xl">/</span>
+              <input
+                type="text"
+                value={pattern}
+                onChange={(e) => setPattern(e.target.value)}
+                placeholder="Votre regex ici..."
+                className="flex-1 font-mono"
+                spellCheck={false}
+              />
+              <span className="text-foreground/40 text-xl">/</span>
+            </div>
             <input
               type="text"
               value={flags}
               onChange={(e) => setFlags(e.target.value)}
-              className="w-16 font-mono text-center"
-              placeholder="flags"
+              className="w-full sm:w-20 font-mono text-center"
+              placeholder="flags (g, i, m...)"
             />
           </div>
 
