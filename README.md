@@ -6,6 +6,8 @@ Une boîte à outils complète pour développeurs avec une interface moderne sty
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC?logo=tailwind-css)
 
+![Aperçu de Crypto Toolbox](.github/assets/home.png)
+
 ## 🎨 Aperçu
 
 Interface sombre style Matrix avec :
