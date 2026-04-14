@@ -49,6 +49,7 @@ const toolCategories = [
       { name: "URL Parser", href: "/tools/url", icon: "🌐" },
       { name: "Color Converter", href: "/tools/color", icon: "🎨" },
       { name: "Cron Generator", href: "/tools/cron", icon: "⏰" },
+      { name: "File Drop", href: "/tools/filedrop", icon: "📡" },
     ],
   },
 ];

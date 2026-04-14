@@ -97,6 +97,12 @@ const tools = [
     href: "/tools/cron",
     icon: "⏰",
   },
+  {
+    title: "File Drop",
+    description: "Partagez un fichier en pair-à-pair via WebRTC. Connexion directe, aucun upload serveur.",
+    href: "/tools/filedrop",
+    icon: "📡",
+  },
 ];
 
 export default function Home() {
