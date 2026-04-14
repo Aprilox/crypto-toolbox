@@ -2,7 +2,7 @@
 
 Une boîte à outils complète pour développeurs avec une interface moderne style **terminal/hacker**.
 
-![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js)
+![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC?logo=tailwind-css)
 
@@ -17,7 +17,7 @@ Interface sombre style Matrix avec :
 - 💻 Police monospace (JetBrains Mono)
 - ✨ Effets glow et scanlines
 
-## 🛠️ Les 16 Outils
+## 🛠️ Les 17 Outils
 
 ### 🔐 Sécurité
 
@@ -59,6 +59,7 @@ Interface sombre style Matrix avec :
 | **URL Parser** | Décomposition complète des URLs, gestion des paramètres |
 | **Color Converter** | HEX, RGB, HSL, HSV, CMYK avec preview |
 | **Cron Generator** | Expressions cron avec presets et explications en français |
+| **📡 File Drop** | Partage P2P via WebRTC — connexion directe entre navigateurs, aucun upload serveur, multi-destinataires simultanés, écriture streaming sur disque (Chrome/Edge) |
 
 ## 🚀 Installation
 
@@ -67,11 +68,11 @@ Interface sombre style Matrix avec :
 git clone https://github.com/Aprilox/crypto-toolbox.git
 cd crypto-toolbox
 
-# Installer les dépendances
-npm install
+# Installer les dépendances (pnpm recommandé)
+pnpm install
 
 # Lancer le serveur de développement
-npm run dev
+pnpm dev
 ```
 
 Ouvrir [http://localhost:3000](http://localhost:3000) dans votre navigateur.
@@ -89,18 +90,42 @@ Ouvrir [http://localhost:3000](http://localhost:3000) dans votre navigateur.
 
 ## 🔒 Sécurité & Confidentialité
 
-- ✅ **100% local** - Aucune donnée n'est envoyée à un serveur
-- ✅ **Pas de tracking** - Aucun analytics ou cookie
-- ✅ **Open source** - Code vérifiable
-- ✅ **Crypto Web API** - Utilise les APIs natives du navigateur
+- ✅ **100% local** — Aucune donnée n'est envoyée à un serveur (sauf File Drop : signaling léger via API, fichier jamais stocké)
+- ✅ **Pas de tracking** — Aucun analytics ou cookie
+- ✅ **Open source** — Code vérifiable
+- ✅ **Crypto Web API** — Utilise les APIs natives du navigateur
+
+### 📡 File Drop — Architecture P2P
+
+File Drop utilise **WebRTC DataChannels** pour envoyer des fichiers directement de navigateur à navigateur :
+
+```
+Expéditeur ◄──── Signaling léger (offre/réponse ICE) ────► Serveur
+Expéditeur ◄════════ Transfert P2P direct (WebRTC) ════════► Receiver(s)
+```
+
+- Le fichier **ne passe jamais par le serveur**
+- Plusieurs destinataires peuvent télécharger simultanément (connexion séparée par receiver)
+- Chrome/Edge : écriture **streaming sur disque** (taille illimitée, pas de RAM)
+- Firefox : chargé en RAM (limité par la RAM disponible)
 
 ## 📁 Structure du Projet
 
 ```
 app/
-├── page.tsx                 # Page d'accueil (16 outils)
+├── page.tsx                 # Page d'accueil (17 outils)
+├── not-found.tsx            # Page 404 personnalisée
 ├── globals.css              # Thème terminal/Matrix
 ├── layout.tsx               # Layout principal
+├── api/
+│   └── filedrop/            # API signaling WebRTC (File Drop)
+│       ├── route.ts         # Création de session
+│       └── [id]/
+│           ├── route.ts     # Info session
+│           ├── join/        # Receiver rejoint
+│           ├── pending/     # Sender poll nouveaux receivers
+│           └── receivers/
+│               └── [rid]/   # Signaling offer/answer par receiver
 ├── components/
 │   ├── Navbar.tsx           # Navigation responsive
 │   ├── ToolCard.tsx         # Carte d'outil
@@ -121,16 +146,17 @@ app/
     ├── diff/                # Comparateur Texte
     ├── url/                 # Parser URL
     ├── lorem/               # Générateur Lorem Ipsum
-    └── cron/                # Générateur Cron
+    ├── cron/                # Générateur Cron
+    └── filedrop/            # Partage P2P WebRTC
 ```
 
 ## 🎯 Scripts Disponibles
 
 ```bash
-npm run dev      # Serveur de développement (port 3000)
-npm run build    # Build de production
-npm run start    # Serveur de production (port 8001)
-npm run lint     # Vérification ESLint
+pnpm dev      # Serveur de développement (port 3000)
+pnpm build    # Build de production
+pnpm start    # Serveur de production (port 8001)
+pnpm lint     # Vérification ESLint
 ```
 
 ## 📄 Licence
