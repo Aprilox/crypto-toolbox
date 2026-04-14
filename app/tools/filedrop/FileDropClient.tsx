@@ -9,7 +9,7 @@ const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
 ];
-const CHUNK_SIZE = 64 * 1024;
+const CHUNK_SIZE = 256 * 1024; // 256 KB — optimal balance for WebRTC DataChannel throughput
 const ICE_GATHER_TIMEOUT_MS = 8000;
 const CONNECT_TIMEOUT_MS = 20000;
 
@@ -58,22 +58,37 @@ function collectIceCandidates(pc: RTCPeerConnection, candidates: RTCIceCandidate
 }
 
 async function sendFileData(dc: RTCDataChannel, file: File, onProgress: (p: number) => void, onDone: () => void) {
+  const BUFFER_HIGH = 4 * 1024 * 1024;  // pause sending when buffer > 4 MB
+  const BUFFER_LOW  = 1 * 1024 * 1024;  // resume when buffer drains to 1 MB
+  dc.bufferedAmountLowThreshold = BUFFER_LOW;
   dc.send(JSON.stringify({ type: "meta", name: file.name, size: file.size, fileType: file.type || "application/octet-stream" }));
   let offset = 0;
-  const next = async (): Promise<void> => {
+
+  const waitForDrain = () =>
+    new Promise<void>((resolve) => {
+      const onLow = () => { dc.removeEventListener("bufferedamountlow", onLow); resolve(); };
+      dc.addEventListener("bufferedamountlow", onLow);
+    });
+
+  while (offset < file.size) {
     if (dc.readyState !== "open") return;
-    if (offset >= file.size) { dc.send(JSON.stringify({ type: "done" })); onDone(); return; }
-    if (dc.bufferedAmount > 2 * 1024 * 1024) {
-      await new Promise<void>((r) => { dc.onbufferedamountlow = () => { dc.onbufferedamountlow = null; r(); }; });
+    // Pause if send buffer is saturated
+    if (dc.bufferedAmount > BUFFER_HIGH) {
+      await waitForDrain();
+      if (dc.readyState !== "open") return;
     }
-    if (dc.readyState !== "open") return;
     const end = Math.min(offset + CHUNK_SIZE, file.size);
     const buf = await file.slice(offset, end).arrayBuffer();
     if (dc.readyState !== "open") return;
-    dc.send(buf); offset = end; onProgress(offset / file.size);
-    setTimeout(next, 0);
-  };
-  next().catch(() => {});
+    dc.send(buf);
+    offset = end;
+    onProgress(offset / file.size);
+  }
+
+  if (dc.readyState === "open") {
+    dc.send(JSON.stringify({ type: "done" }));
+    onDone();
+  }
 }
 
 export default function FileDropClient() {
