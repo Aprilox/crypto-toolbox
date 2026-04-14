@@ -20,6 +20,10 @@ interface PeerEntry {
   receiverId: string;
   pc: RTCPeerConnection | null;
   progress: number;
+  bytesSent: number;
+  speed: number;      // bytes/sec upload speed
+  lastTs: number;     // timestamp of last speed sample
+  lastBytes: number;  // bytes at last speed sample
   status: PeerStatus;
   error: string;
   label: string;
@@ -30,7 +34,13 @@ interface SessionData { fileName: string; fileSize: number; fileType: string; }
 function formatBytes(b: number) {
   if (b === 0) return "0 B";
   const k = 1024, s = ["B", "KB", "MB", "GB", "TB"], i = Math.floor(Math.log(b) / Math.log(k));
-  return parseFloat((b / Math.pow(k, i)).toFixed(2)) + " " + s[i];
+  return parseFloat((b / Math.pow(k, i)).toFixed(2)) + " " + s[i];
+}
+
+function formatSpeed(bps: number) {
+  if (bps <= 0) return "";
+  if (bps >= 1024 * 1024) return (bps / (1024 * 1024)).toFixed(1) + " MB/s";
+  return (bps / 1024).toFixed(0) + " KB/s";
 }
 
 function sdpWithCandidates(sdp: string, candidates: RTCIceCandidateInit[]): string {
@@ -57,7 +67,7 @@ function collectIceCandidates(pc: RTCPeerConnection, candidates: RTCIceCandidate
   });
 }
 
-async function sendFileData(dc: RTCDataChannel, file: File, onProgress: (p: number) => void, onDone: () => void) {
+async function sendFileData(dc: RTCDataChannel, file: File, onProgress: (sentBytes: number) => void, onDone: () => void) {
   const BUFFER_HIGH = 4 * 1024 * 1024;  // pause sending when buffer > 4 MB
   const BUFFER_LOW  = 1 * 1024 * 1024;  // resume when buffer drains to 1 MB
   dc.bufferedAmountLowThreshold = BUFFER_LOW;
@@ -82,7 +92,7 @@ async function sendFileData(dc: RTCDataChannel, file: File, onProgress: (p: numb
     if (dc.readyState !== "open") return;
     dc.send(buf);
     offset = end;
-    onProgress(offset / file.size);
+    onProgress(offset); // pass absolute bytes
   }
 
   if (dc.readyState === "open") {
@@ -112,6 +122,7 @@ function SenderView() {
   const sessionIdRef = useRef("");
   const fileRef = useRef<File | null>(null);
   const peerCountRef = useRef(0);
+  const lastSyncRef = useRef(0); // throttle UI updates
 
   useEffect(() => {
     mountedRef.current = true;
@@ -127,7 +138,12 @@ function SenderView() {
   const shareUrl = sessionId && typeof window !== "undefined"
     ? `${window.location.origin}/tools/filedrop?id=${sessionId}` : "";
 
-  const sync = () => setPeers(Array.from(peersRef.current.values()));
+  const sync = (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastSyncRef.current < 250) return; // max 4 fps
+    lastSyncRef.current = now;
+    setPeers(Array.from(peersRef.current.values()).map(p => ({ ...p })));
+  };
 
   const cancelPeer = async (receiverId: string) => {
     const peer = peersRef.current.get(receiverId);
@@ -164,7 +180,9 @@ function SenderView() {
     processingRef.current.add(receiverId);
 
     const peer: PeerEntry = {
-      receiverId, pc: null, progress: 0, status: "pending", error: "",
+      receiverId, pc: null, progress: 0, bytesSent: 0, speed: 0,
+      lastTs: Date.now(), lastBytes: 0,
+      status: "pending", error: "",
       label: `Destinataire #${++peerCountRef.current}`,
     };
     peersRef.current.set(receiverId, peer);
@@ -183,7 +201,19 @@ function SenderView() {
         if (!mountedRef.current) return;
         peer.status = "transferring"; sync();
         sendFileData(dc, file,
-          (p) => { if (!mountedRef.current) return; peer.progress = p; sync(); },
+          (sentBytes) => {
+            if (!mountedRef.current) return;
+            const now = Date.now();
+            const dt = (now - peer.lastTs) / 1000;
+            if (dt >= 0.5) { // update speed every 500ms
+              peer.speed = (sentBytes - peer.lastBytes) / dt;
+              peer.lastBytes = sentBytes;
+              peer.lastTs = now;
+            }
+            peer.progress = sentBytes / file.size;
+            peer.bytesSent = sentBytes;
+            sync();
+          },
           () => {
             if (!mountedRef.current) return;
             peer.status = "done"; peer.progress = 1; sync();
@@ -398,15 +428,29 @@ function SenderView() {
 
                       {(peer.status === "transferring" || peer.status === "done") && (
                         <>
-                          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden mb-1">
+                          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden mb-2">
                             <div
                               className={`h-full transition-all duration-200 ${peer.status === "done" ? "bg-green-500" : "bg-accent"}`}
                               style={{ width: `${peer.progress * 100}%` }}
                             />
                           </div>
-                          <p className="text-foreground/40 text-xs text-right">
-                            {Math.round(peer.progress * 100)}% · {formatBytes(peer.progress * (file?.size ?? 0))} / {formatBytes(file?.size ?? 0)}
-                          </p>
+                          {/* Fixed-width stats row — tabular-nums prevents jitter */}
+                          <div className="flex items-center justify-between text-xs font-mono" style={{ fontVariantNumeric: "tabular-nums" }}>
+                            <span className="text-foreground/50 w-10 text-right">
+                              {Math.round(peer.progress * 100)}%
+                            </span>
+                            <span className="text-foreground/30 mx-2">·</span>
+                            <span className="text-foreground/40 w-28 text-right">
+                              {formatBytes(peer.bytesSent)}
+                            </span>
+                            <span className="text-foreground/20 mx-1">/</span>
+                            <span className="text-foreground/30 w-24">
+                              {formatBytes(file?.size ?? 0)}
+                            </span>
+                            <span className="ml-auto text-accent/70 w-20 text-right">
+                              {peer.speed > 0 ? `↑ ${formatSpeed(peer.speed)}` : ""}
+                            </span>
+                          </div>
                         </>
                       )}
 
@@ -466,9 +510,15 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
   const [status, setStatus] = useState<ReceiverStatus>("loading");
   const [session, setSession] = useState<SessionData | null>(null);
   const [progress, setProgress] = useState(0);
+  const [receivedBytes, setReceivedBytes] = useState(0);
+  const [speed, setSpeed] = useState(0); // bytes/sec download speed
   const [error, setError] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
   const [streaming, setStreaming] = useState(false);
+
+  const speedLastTsRef = useRef(Date.now());
+  const speedLastBytesRef = useRef(0);
+  const lastUiUpdateRef = useRef(0);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -658,10 +708,24 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
             const chunk = ev.data as ArrayBuffer;
             receivedSizeRef.current += chunk.byteLength;
             const total = totalSizeRef.current || capturedSession.fileSize;
-            if (mountedRef.current) setProgress(receivedSizeRef.current / total);
             if (writableRef.current) {
               writeChainRef.current = writeChainRef.current.then(() => writableRef.current!.write(chunk)).catch(() => {});
             } else { chunksRef.current.push(chunk); }
+            // Throttle UI updates to ~4fps, compute speed every 500ms
+            if (mountedRef.current) {
+              const now = Date.now();
+              if (now - lastUiUpdateRef.current >= 250) {
+                lastUiUpdateRef.current = now;
+                const dt = (now - speedLastTsRef.current) / 1000;
+                if (dt >= 0.5) {
+                  setSpeed((receivedSizeRef.current - speedLastBytesRef.current) / dt);
+                  speedLastTsRef.current = now;
+                  speedLastBytesRef.current = receivedSizeRef.current;
+                }
+                setReceivedBytes(receivedSizeRef.current);
+                setProgress(receivedSizeRef.current / total);
+              }
+            }
           }
         };
         dc.onerror = () => handleDisconnect("Erreur de canal de données");
@@ -799,12 +863,28 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
             </div>
 
             <div className="card mb-6">
-              <div className="flex justify-between text-sm text-foreground/60 mb-2">
-                <span>{streaming ? "Écriture sur disque" : "Réception en mémoire"}</span>
-                <span>{Math.round(progress * 100)}% · {formatBytes(progress * session.fileSize)} / {formatBytes(session.fileSize)}</span>
-              </div>
-              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+              {/* Progress bar */}
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden mb-3">
                 <div className="h-full bg-accent transition-all duration-200" style={{ width: `${progress * 100}%` }} />
+              </div>
+              {/* Fixed-width stats — tabular-nums prevents number jitter */}
+              <div className="flex items-center text-xs font-mono gap-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                <span className="text-foreground/50 w-10 text-right shrink-0">
+                  {Math.round(progress * 100)}%
+                </span>
+                <span className="text-foreground/20">·</span>
+                <span className="text-foreground/40 w-28 text-right shrink-0">
+                  {formatBytes(receivedBytes)}
+                </span>
+                <span className="text-foreground/20">/</span>
+                <span className="text-foreground/30 w-24 shrink-0">
+                  {formatBytes(session.fileSize)}
+                </span>
+                {speed > 0 && (
+                  <span className="ml-auto text-accent/70 w-20 text-right shrink-0">
+                    ↓ {formatSpeed(speed)}
+                  </span>
+                )}
               </div>
               {streaming && status === "receiving" && (
                 <p className="text-foreground/30 text-xs mt-2">Écriture directe sur disque — aucun stockage en mémoire</p>
