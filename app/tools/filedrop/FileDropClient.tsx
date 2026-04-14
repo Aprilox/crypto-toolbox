@@ -150,7 +150,7 @@ function SenderView() {
     if (!peer || peer.status === "done" || peer.status === "cancelled") return;
     if (peer.pc) { peer.pc.close(); peer.pc = null; }
     peer.status = "cancelled";
-    sync();
+    sync(true); // force immediate — bypasses 4fps throttle
     fetch(`/api/filedrop/${sessionIdRef.current}/receivers/${receiverId}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "cancelled" }),
@@ -216,7 +216,7 @@ function SenderView() {
           },
           () => {
             if (!mountedRef.current) return;
-            peer.status = "done"; peer.progress = 1; sync();
+            peer.status = "done"; peer.progress = 1; sync(true);
             fetch(`/api/filedrop/${sid}/receivers/${receiverId}`, {
               method: "PUT", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ status: "done" }),
@@ -228,7 +228,7 @@ function SenderView() {
       pc.oniceconnectionstatechange = () => {
         if (!mountedRef.current) return;
         if (pc.iceConnectionState === "failed") {
-          peer.status = "error"; peer.error = "Connexion ICE échouée"; sync();
+          peer.status = "error"; peer.error = "Connexion ICE échouée"; sync(true);
         }
       };
 
@@ -242,7 +242,7 @@ function SenderView() {
       const baseSdp = pc.localDescription?.sdp ?? offer.sdp ?? "";
       const inSdp = (baseSdp.match(/a=candidate:/g) || []).length;
       if (inSdp === 0 && candidates.length === 0) {
-        peer.status = "error"; peer.error = "Aucun candidat ICE (UDP bloqué ?)"; pc.close(); sync(); return;
+        peer.status = "error"; peer.error = "Aucun candidat ICE (UDP bloqué ?)"; pc.close(); sync(true); return;
       }
       const finalSdp = inSdp > 0 ? baseSdp : sdpWithCandidates(baseSdp, candidates);
 
@@ -251,10 +251,10 @@ function SenderView() {
         body: JSON.stringify({ offer: { type: "offer", sdp: finalSdp } }),
       });
       if (!mountedRef.current) return;
-      peer.status = "offer-sent"; sync();
+      peer.status = "offer-sent"; sync(true);
 
     } catch (err) {
-      peer.status = "error"; peer.error = err instanceof Error ? err.message : "Erreur inconnue"; sync();
+      peer.status = "error"; peer.error = err instanceof Error ? err.message : "Erreur inconnue"; sync(true);
     }
   };
 
