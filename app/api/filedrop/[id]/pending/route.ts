@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessions } from "@/lib/filedrop-store";
 
-// Sender polls this to learn about new receivers and pending answers
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = sessions.get(params.id);
+  const { id } = await params;
+  const session = sessions.get(id);
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
   const slots = Array.from(session.receivers.values())

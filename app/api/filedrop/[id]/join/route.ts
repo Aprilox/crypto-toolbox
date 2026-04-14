@@ -3,9 +3,10 @@ import { sessions, generateId } from "@/lib/filedrop-store";
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = sessions.get(params.id);
+  const { id } = await params;
+  const session = sessions.get(id);
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
   const receiverId = generateId();

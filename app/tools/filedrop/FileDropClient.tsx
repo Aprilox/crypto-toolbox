@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import CopyButton from "@/app/components/CopyButton";
 
 const ICE_SERVERS = [
@@ -277,7 +278,7 @@ function SenderView() {
     <div className="min-h-screen px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-2xl mx-auto">
         <div className="mb-8">
-          <a href="/" className="text-foreground/40 hover:text-foreground text-sm transition-colors">← Retour</a>
+          <Link href="/" className="text-foreground/40 hover:text-foreground text-sm transition-colors">← Retour</Link>
           <h1 className="text-3xl font-bold mt-4 mb-2">
             <span className="text-foreground">📡 File</span><span className="text-accent">Drop</span>
           </h1>

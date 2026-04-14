@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessions } from "@/lib/filedrop-store";
 
-// Receiver polls this for the sender's offer
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string; rid: string } }
+  { params }: { params: Promise<{ id: string; rid: string }> }
 ) {
-  const session = sessions.get(params.id);
+  const { id, rid } = await params;
+  const session = sessions.get(id);
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  const slot = session.receivers.get(params.rid);
+  const slot = session.receivers.get(rid);
   if (!slot) return NextResponse.json({ error: "Receiver not found" }, { status: 404 });
   return NextResponse.json({ offer: slot.offer, status: slot.status });
 }
 
-// Sender pushes their offer for this receiver
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string; rid: string } }
+  { params }: { params: Promise<{ id: string; rid: string }> }
 ) {
-  const session = sessions.get(params.id);
+  const { id, rid } = await params;
+  const session = sessions.get(id);
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  const slot = session.receivers.get(params.rid);
+  const slot = session.receivers.get(rid);
   if (!slot) return NextResponse.json({ error: "Receiver not found" }, { status: 404 });
 
   const body = await req.json();
@@ -29,14 +29,14 @@ export async function PUT(
   return NextResponse.json({ ok: true });
 }
 
-// Receiver pushes their answer
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string; rid: string } }
+  { params }: { params: Promise<{ id: string; rid: string }> }
 ) {
-  const session = sessions.get(params.id);
+  const { id, rid } = await params;
+  const session = sessions.get(id);
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
-  const slot = session.receivers.get(params.rid);
+  const slot = session.receivers.get(rid);
   if (!slot) return NextResponse.json({ error: "Receiver not found" }, { status: 404 });
 
   const body = await req.json();
