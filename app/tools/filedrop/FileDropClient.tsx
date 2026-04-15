@@ -21,16 +21,18 @@ interface PeerEntry {
   receiverId: string;
   pc: RTCPeerConnection | null;
   progress: number;
+  analyzeProgress?: number;
   bytesSent: number;
   speed: number;      // bytes/sec upload speed
   lastTs: number;     // timestamp of last speed sample
   lastBytes: number;  // bytes at last speed sample
+  filesCount?: number;
   status: PeerStatus;
   error: string;
   label: string;
 }
 
-interface SessionData { fileName: string; fileSize: number; fileType: string; isDirectory?: boolean; }
+interface SessionData { fileName: string; fileSize: number; fileType: string; isDirectory?: boolean; filesCount?: number; }
 
 function formatBytes(b: number) {
   if (b === 0) return "0 B";
@@ -126,6 +128,7 @@ export default function FileDropClient() {
 
 function SenderView() {
   const [selectedContent, setSelectedContent] = useState<{ isDirectory: boolean; baseName: string; totalSize: number; files: File[] } | null>(null);
+  const [scanPhase, setScanPhase] = useState<{ isScanning: boolean; baseName: string; count: number; totalSize: number } | null>(null);
   const [sessionId, setSessionId] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
@@ -213,16 +216,30 @@ function SenderView() {
 
       const dc = pc.createDataChannel("filedrop", { ordered: true });
       dc.bufferedAmountLowThreshold = 1024 * 1024;
-      dc.onopen = () => {
+      dc.onopen = async () => {
         if (!mountedRef.current) return;
-        peer.status = "analyzing"; sync();
+        peer.status = "analyzing"; sync(true);
 
         if (selected.isDirectory || selected.files.length > 1) {
           const filesMeta = selected.files.map((f: any) => ({
             path: f.customPath || f.webkitRelativePath || f.name,
             size: f.size
           }));
-          dc.send(JSON.stringify({ type: "meta_multi", isDirectory: true, name: selected.baseName, size: selected.totalSize, files: filesMeta }));
+          
+          dc.send(JSON.stringify({ type: "meta_multi_start", isDirectory: true, name: selected.baseName, size: selected.totalSize, totalFiles: filesMeta.length }));
+          
+          const batchSize = 1000;
+          for (let i = 0; i < filesMeta.length; i += batchSize) {
+             const chunk = filesMeta.slice(i, i + batchSize);
+             if (dc.readyState !== "open") return;
+             dc.send(JSON.stringify({ type: "meta_multi_chunk", files: chunk }));
+             // yield to event loop to avoid locking thread too long for massive folders
+             await new Promise(r => setTimeout(r, 5));
+          }
+          
+          if (dc.readyState === "open") {
+             dc.send(JSON.stringify({ type: "meta_multi_end" }));
+          }
         } else {
           const file = selected.files[0];
           dc.send(JSON.stringify({ type: "meta", name: file.name, size: file.size, fileType: file.type || "application/octet-stream" }));
@@ -246,6 +263,11 @@ function SenderView() {
                     }
                     peer.progress = msg.bytes / selected.totalSize;
                     peer.bytesSent = msg.bytes;
+                    if (msg.filesCount !== undefined) peer.filesCount = msg.filesCount;
+                    sync();
+                } else if (msg.type === "analyze_progress") {
+                    if (!mountedRef.current) return;
+                    peer.analyzeProgress = msg.current / msg.total;
                     sync();
                 } else if (msg.type === "disk_done") {
                     if (!mountedRef.current) return;
@@ -295,7 +317,7 @@ function SenderView() {
   const completeConnection = async (receiverId: string, answer: RTCSessionDescriptionInit) => {
     const peer = peersRef.current.get(receiverId);
     if (!peer || !peer.pc || peer.status !== "offer-sent") return;
-    peer.status = "connecting"; sync();
+    peer.status = "connecting"; sync(true);
     try {
       await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
     } catch (err) {
@@ -383,6 +405,7 @@ function SenderView() {
             <div
               onDrop={async (e) => {
                 e.preventDefault();
+                if (scanPhase?.isScanning) return;
                 const items = e.dataTransfer.items;
                 if (!items || items.length === 0) return;
                 
@@ -390,50 +413,79 @@ function SenderView() {
                 let isDirectory = false;
                 let baseName = "";
 
-                const traverseFileTree = async (item: any, path: string = "") => {
-                  if (item.isFile) {
-                    const file = await new Promise<File>((resolve) => item.file(resolve));
-                    Object.defineProperty(file, 'customPath', { value: path + file.name });
-                    fileEntries.push(file);
-                  } else if (item.isDirectory) {
-                    isDirectory = true;
-                    const dirReader = item.createReader();
-                    const entries = await new Promise<any[]>((resolve) => {
-                      const allEntries: any[] = [];
-                      const readNext = () => {
-                        dirReader.readEntries((batch: any[]) => {
-                          if (batch.length > 0) { allEntries.push(...batch); readNext(); }
-                          else { resolve(allEntries); }
-                        });
-                      };
-                      readNext();
-                    });
-                    if (entries.length === 0) {
-                        const emptyFolderMarker = new File([], item.name, { type: "application/x-empty-folder" });
-                        Object.defineProperty(emptyFolderMarker, 'customPath', { value: path + item.name + "/" });
-                        fileEntries.push(emptyFolderMarker);
-                    } else {
-                        for (const entry of entries) {
-                          await traverseFileTree(entry, path + item.name + "/");
-                        }
-                    }
-                  }
-                };
-
                 for (let i = 0; i < items.length; i++) {
-                  const item = items[i].webkitGetAsEntry();
-                  if (item) {
-                     if (i === 0) baseName = item.name;
-                     await traverseFileTree(item);
+                  const entry = items[i].webkitGetAsEntry();
+                  if (entry && i === 0) {
+                     baseName = entry.name;
+                     if (entry.isDirectory) isDirectory = true;
                   }
                 }
                 
+                if (!baseName) return;
+                setScanPhase({ isScanning: true, baseName, count: 0, totalSize: 0 });
+                
+                let scanCount = 0;
+                let scanSize = 0;
+                let lastUI = Date.now();
+
+                const traverseFileTree = async (item: any, path: string = ""): Promise<void> => {
+                  return new Promise((resolveTraverse) => {
+                    if (item.isFile) {
+                      item.file((file: File) => {
+                        Object.defineProperty(file, 'customPath', { value: path + file.name });
+                        fileEntries.push(file);
+                        scanCount++;
+                        scanSize += file.size;
+                        const now = Date.now();
+                        if (now - lastUI > 150) {
+                             lastUI = now;
+                             setScanPhase(prev => prev ? { ...prev, count: scanCount, totalSize: scanSize } : null);
+                        }
+                        resolveTraverse();
+                      });
+                  } else if (item.isDirectory) {
+                    isDirectory = true;
+                    const dirReader = item.createReader();
+                    const allEntries: any[] = [];
+                    const readNext = () => {
+                      dirReader.readEntries(async (batch: any[]) => {
+                        if (batch.length > 0) { allEntries.push(...batch); readNext(); }
+                        else {
+                           if (allEntries.length === 0) {
+                             const emptyFolderMarker = new File([], item.name, { type: "application/x-empty-folder" });
+                             Object.defineProperty(emptyFolderMarker, 'customPath', { value: path + item.name + "/" });
+                             fileEntries.push(emptyFolderMarker);
+                             resolveTraverse();
+                           } else {
+                             await Promise.all(allEntries.map(entry => traverseFileTree(entry, path + item.name + "/")));
+                             resolveTraverse();
+                           }
+                        }
+                      });
+                    };
+                    readNext();
+                  }
+                });
+              };
+
+              const rootPromises: Promise<void>[] = [];
+              for (let i = 0; i < items.length; i++) {
+                const item = items[i].webkitGetAsEntry();
+                if (item) {
+                   rootPromises.push(traverseFileTree(item));
+                }
+              }
+              await Promise.all(rootPromises);
+              
                 if (fileEntries.length > 0) {
                    if (fileEntries.length > 1 && !isDirectory) isDirectory = true; 
                    if (baseName === "" && isDirectory) baseName = "Fichiers";
                    if (!isDirectory) baseName = fileEntries[0].name;
                    const totalSize = fileEntries.reduce((acc, f) => acc + f.size, 0);
+                   setScanPhase(null);
                    setSelectedContent({ isDirectory, baseName, totalSize, files: fileEntries });
+                } else {
+                   setScanPhase(null);
                 }
               }}
               onDragOver={(e) => e.preventDefault()}
@@ -447,11 +499,39 @@ function SenderView() {
                   <input type="file" multiple className="hidden" onChange={(e) => {
                     const fileList = e.target.files;
                     if (!fileList || fileList.length === 0) return;
-                    const fileEntries = Array.from(fileList);
-                    const isDirectory = fileEntries.length > 1;
-                    const baseName = isDirectory ? "Fichiers" : fileEntries[0].name;
-                    const totalSize = fileEntries.reduce((acc, f) => acc + f.size, 0);
-                    setSelectedContent({ isDirectory, baseName, totalSize, files: fileEntries });
+                    
+                    const isDirectory = fileList.length > 1;
+                    const baseName = isDirectory ? "Fichiers" : fileList[0].name;
+                    
+                    setScanPhase({ isScanning: true, baseName, count: 0, totalSize: 0 });
+                    
+                    setTimeout(() => {
+                         const fileEntries: File[] = [];
+                         let scanSize = 0;
+                         const total = fileList.length;
+                         const CHUNK_SIZE = 1000;
+                         let i = 0;
+
+                         const processChunk = () => {
+                             const end = Math.min(i + CHUNK_SIZE, total);
+                             for (; i < end; i++) {
+                                 const f = fileList[i];
+                                 fileEntries.push(f);
+                                 scanSize += f.size;
+                             }
+                             setScanPhase(prev => {
+                                 if (!prev) return { isScanning: true, baseName, count: i, totalSize: scanSize };
+                                 return { ...prev, count: i, totalSize: scanSize };
+                             });
+                             if (i < total) {
+                                  setTimeout(processChunk, 5);
+                             } else {
+                                  setScanPhase(null);
+                                  setSelectedContent({ isDirectory, baseName, totalSize: scanSize, files: fileEntries });
+                             }
+                         };
+                         processChunk();
+                    }, 50);
                   }} />
                 </label>
                 <label className="btn btn-outline cursor-pointer text-sm">
@@ -459,17 +539,59 @@ function SenderView() {
                   <input type="file" {...({ webkitdirectory: "", directory: "" } as any)} className="hidden" onChange={(e) => {
                     const fileList = e.target.files;
                     if (!fileList || fileList.length === 0) return;
-                    const fileEntries = Array.from(fileList);
-                    fileEntries.forEach(f => {
-                       Object.defineProperty(f, 'customPath', { value: f.webkitRelativePath });
-                    });
-                    const baseName = fileEntries[0].webkitRelativePath?.split('/')[0] || "Dossier";
-                    const totalSize = fileEntries.reduce((acc, f) => acc + f.size, 0);
-                    setSelectedContent({ isDirectory: true, baseName, totalSize, files: fileEntries });
+
+                    let baseName = "Dossier";
+                    if (fileList[0].webkitRelativePath) {
+                        baseName = fileList[0].webkitRelativePath.split('/')[0];
+                    } else if (fileList[0].name) {
+                        baseName = fileList[0].name;
+                    }
+                    
+                    setScanPhase({ isScanning: true, baseName, count: 0, totalSize: 0 });
+                    
+                    setTimeout(() => {
+                         const fileEntries: File[] = [];
+                         let scanSize = 0;
+                         const total = fileList.length;
+                         const CHUNK_SIZE = 500;
+                         let i = 0;
+
+                         const processChunk = () => {
+                             const end = Math.min(i + CHUNK_SIZE, total);
+                             for (; i < end; i++) {
+                                 const f = fileList[i];
+                                 fileEntries.push(f);
+                                 scanSize += f.size;
+                             }
+                             setScanPhase(prev => {
+                                 if (!prev) return { isScanning: true, baseName, count: i, totalSize: scanSize };
+                                 return { ...prev, count: i, totalSize: scanSize };
+                             });
+                             if (i < total) {
+                                  setTimeout(processChunk, 5);
+                             } else {
+                                  setScanPhase(null);
+                                  setSelectedContent({ isDirectory: true, baseName, totalSize: scanSize, files: fileEntries });
+                             }
+                         };
+                         processChunk();
+                    }, 50);
                   }} />
                 </label>
               </div>
             </div>
+            {scanPhase?.isScanning && (
+              <div className="card mb-6 border-accent/50 animate-pulse">
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <p className="font-bold text-accent truncate">{scanPhase.baseName}</p>
+                    <p className="text-foreground/50 text-sm mt-1">
+                      Analyse en cours... {scanPhase.count} fichiers · {formatBytes(scanPhase.totalSize)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             {selectedContent && (
               <div className="card mb-6">
                 <div className="flex items-center justify-between">
@@ -484,7 +606,8 @@ function SenderView() {
                 </div>
               </div>
             )}
-            {selectedContent && <button onClick={startSharing} className="btn btn-cyan w-full">Générer le lien de partage →</button>}
+            {selectedContent && !scanPhase?.isScanning && <button onClick={startSharing} className="btn btn-cyan w-full">Générer le lien de partage →</button>}
+            {scanPhase?.isScanning && <button disabled className="btn btn-cyan w-full opacity-50 cursor-not-allowed">Génération en préparation...</button>}
             {error && <p className="text-red-400 text-sm mt-3 text-center">{error}</p>}
           </>
         )}
@@ -574,6 +697,16 @@ function SenderView() {
                             <span className="text-foreground/30 w-24">
                               {formatBytes(selectedContent?.totalSize ?? 0)}
                             </span>
+                            
+                            {selectedContent?.isDirectory && peer.filesCount !== undefined && (
+                              <>
+                                <span className="text-foreground/20 mx-1">·</span>
+                                <span className="text-foreground/40 whitespace-nowrap text-right shrink-0">
+                                  {peer.status === "done" ? selectedContent.files.length : peer.filesCount} / {selectedContent.files.length} f.
+                                </span>
+                              </>
+                            )}
+                            
                             <span className="ml-auto text-accent/70 w-20 text-right">
                               {peer.speed > 0 && peer.status !== "done" ? `↑ ${formatSpeed(peer.speed)}` : ""}
                             </span>
@@ -593,6 +726,27 @@ function SenderView() {
                         <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
                           <div className="h-full bg-accent/40 animate-pulse w-full" />
                         </div>
+                      )}
+
+                      {peer.status === "analyzing" && (
+                        <>
+                          <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden mb-2">
+                            {peer.analyzeProgress !== undefined ? (
+                                <div className="h-full bg-yellow-500 transition-all duration-200" style={{ width: `${peer.analyzeProgress * 100}%` }} />
+                            ) : (
+                                <div className="h-full bg-yellow-500/40 animate-pulse w-full" />
+                            )}
+                          </div>
+                          {peer.analyzeProgress !== undefined ? (
+                             <div className="flex items-center justify-between text-xs font-mono">
+                                <span className="text-yellow-500/70">Analyse de la reprise : {Math.round(peer.analyzeProgress * 100)}%</span>
+                             </div>
+                          ) : (
+                             <div className="flex items-center justify-between text-xs font-mono">
+                                <span className="text-yellow-500/70">Envoi de l&apos;architecture en cours...</span>
+                             </div>
+                          )}
+                        </>
                       )}
 
                       {peer.status === "connecting" && (
@@ -645,11 +799,13 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
   const [status, setStatus] = useState<ReceiverStatus>("loading");
   const [session, setSession] = useState<SessionData | null>(null);
   const [progress, setProgress] = useState(0);
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ current: number; total: number } | null>(null);
   const [receivedBytes, setReceivedBytes] = useState(0);
   const [speed, setSpeed] = useState(0); // bytes/sec download speed
   const [error, setError] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [currentFileStat, setCurrentFileStat] = useState(0);
 
   const speedLastTsRef = useRef(Date.now());
   const speedLastBytesRef = useRef(0);
@@ -860,6 +1016,7 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
         const dc = e.channel; dc.binaryType = "arraybuffer";
         dcRef.current = dc;
         if (connTimeoutRef.current) clearTimeout(connTimeoutRef.current);
+        if (mountedRef.current) setStatus("analyzing");
 
         dc.onmessage = (ev) => {
           if (typeof ev.data === "string") {
@@ -881,27 +1038,51 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
               };
               buildResume();
 
-            } else if (msg.type === "meta_multi") {
-              totalSizeRef.current = msg.size;
-              metaMultiRef.current = msg;
-              if (mountedRef.current) setStatus("analyzing");
-
+            } else if (msg.type === "meta_multi_start") {
+              metaMultiRef.current = { ...msg, files: [] };
+              setSession(prev => prev ? { ...prev, filesCount: msg.totalFiles } : null);
+            } else if (msg.type === "meta_multi_chunk") {
+              if (metaMultiRef.current) {
+                 metaMultiRef.current.files.push(...msg.files);
+              }
+            } else if (msg.type === "meta_multi_end") {
+              if (!metaMultiRef.current) return;
+              const msgFull = metaMultiRef.current;
+              totalSizeRef.current = msgFull.size;
+              
               const buildResume = async () => {
                 const map: Record<number, number> = {};
                 if (dirHandleRef.current && useStreaming) {
-                  for (let i = 0; i < msg.files.length; i++) {
+                  const localDirCache = new Map<string, FSDirHandle>();
+                  let lastUI = Date.now();
+                  if (mountedRef.current) setAnalyzeProgress({ current: 0, total: msgFull.files.length });
+                  
+                  for (let i = 0; i < msgFull.files.length; i++) {
                     if (statusRef.current === "cancelled") return;
-                    const fMeta = msg.files[i];
+                    
+                    const now = Date.now();
+                    if (now - lastUI > 150) {
+                        lastUI = now;
+                        if (mountedRef.current) setAnalyzeProgress({ current: i, total: msgFull.files.length });
+                        if (dc.readyState === "open") dc.send(JSON.stringify({ type: "analyze_progress", current: i, total: msgFull.files.length }));
+                    }
+
+                    const fMeta = msgFull.files[i];
                     if (fMeta.size === 0) continue;
                     try {
                       const parts = fMeta.path.split('/');
                       let cDir = dirHandleRef.current;
+                      let currentPath = "";
                       if (!(parts.length > 1 && parts[0] === capturedSession.fileName)) {
-                         try { cDir = await cDir.getDirectoryHandle(capturedSession.fileName, { create: false }); } catch { continue; }
+                         currentPath = capturedSession.fileName;
+                         if (localDirCache.has(currentPath)) { cDir = localDirCache.get(currentPath)!; }
+                         else { try { cDir = await cDir.getDirectoryHandle(capturedSession.fileName, { create: false }); localDirCache.set(currentPath, cDir); } catch { continue; } }
                       }
                       let found = true;
                       for (let j = 0; j < parts.length - 1; j++) {
-                        try { cDir = await cDir.getDirectoryHandle(parts[j], { create: false }); } catch { found = false; break; }
+                        currentPath += (currentPath ? "/" : "") + parts[j];
+                        if (localDirCache.has(currentPath)) { cDir = localDirCache.get(currentPath)!; }
+                        else { try { cDir = await cDir.getDirectoryHandle(parts[j], { create: false }); localDirCache.set(currentPath, cDir); } catch { found = false; break; } }
                       }
                       if (found && parts[parts.length - 1] !== "") {
                         const fh = await cDir.getFileHandle(parts[parts.length - 1], { create: false });
@@ -910,18 +1091,19 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
                       }
                     } catch {}
                   }
+                  if (mountedRef.current) setAnalyzeProgress(null);
                 }
                 
                 let initIdx = 0;
-                while (initIdx < msg.files.length) {
-                   if (msg.files[initIdx].size !== 0 && map[initIdx] === msg.files[initIdx].size) initIdx++;
+                while (initIdx < msgFull.files.length) {
+                   if (msgFull.files[initIdx].size !== 0 && map[initIdx] === msgFull.files[initIdx].size) initIdx++;
                    else break;
                 }
                 currentFileIndexRef.current = initIdx;
                 currentFileBytesRef.current = map[initIdx] || 0;
                 
                 let receivedSoFar = 0;
-                for (let i = 0; i < msg.files.length; i++) receivedSoFar += (map[i] || 0);
+                for (let i = 0; i < msgFull.files.length; i++) receivedSoFar += (map[i] || 0);
                 receivedSizeRef.current = receivedSoFar;
                 
                 resumeMapRef.current = map;
@@ -940,6 +1122,11 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
                   writableRef.current = null;
                   if (!(window as any).__pendingCloses) (window as any).__pendingCloses = [];
                   (window as any).__pendingCloses.push(w.close().catch(() => {}));
+                }
+                
+                if ((window as any).__activeWrites && (window as any).__activeWrites.size > 0) {
+                   await Promise.all(Array.from((window as any).__activeWrites)).catch(()=>{});
+                   (window as any).__activeWrites.clear();
                 }
                 
                 if ((window as any).__pendingCloses) {
@@ -988,8 +1175,9 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
                     }
                     setReceivedBytes(receivedSizeRef.current);
                     setProgress(receivedSizeRef.current / total);
+                    setCurrentFileStat(currentFileIndexRef.current + 1);
                     if (dcRef.current?.readyState === "open") {
-                        dcRef.current.send(JSON.stringify({ type: "progress", bytes: receivedSizeRef.current }));
+                        dcRef.current.send(JSON.stringify({ type: "progress", bytes: receivedSizeRef.current, filesCount: currentFileIndexRef.current }));
                     }
                   }
                 }
@@ -1003,72 +1191,151 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
                   if (currentIdx >= meta.files.length) return;
                   const fileMeta = meta.files[currentIdx];
                   
-                  if (!writableRef.current && dirHandleRef.current && !currentFileFailedRef.current) {
-                     try {
-                         const pathParts = fileMeta.path.split('/');
-                         let currentDir = dirHandleRef.current;
-                         let cachePath = "";
-                         
-                         if (!(pathParts.length > 1 && pathParts[0] === capturedSession.fileName)) {
-                             cachePath = capturedSession.fileName;
-                             if (dirCacheRef.current.has(cachePath)) {
-                                 currentDir = dirCacheRef.current.get(cachePath)!;
-                             } else {
-                                 currentDir = await currentDir.getDirectoryHandle(capturedSession.fileName, { create: true });
-                                 dirCacheRef.current.set(cachePath, currentDir);
-                             }
-                         }
-                         
-                         for (let i = 0; i < pathParts.length - 1; i++) {
-                             cachePath += (cachePath ? "/" : "") + pathParts[i];
-                             if (dirCacheRef.current.has(cachePath)) {
-                                 currentDir = dirCacheRef.current.get(cachePath)!;
-                             } else {
-                                 currentDir = await currentDir.getDirectoryHandle(pathParts[i], { create: true });
-                                 dirCacheRef.current.set(cachePath, currentDir);
-                             }
-                         }
-                         
-                         const lastPart = pathParts[pathParts.length - 1];
-                         if (lastPart !== "") {
-                             const handle = await currentDir.getFileHandle(lastPart, { create: true });
-                             const existingBytes = resumeMapRef.current[currentIdx] || 0;
-                             writableRef.current = await handle.createWritable({ keepExistingData: true });
-                             if (existingBytes > 0) {
-                                 await writableRef.current.seek(existingBytes);
-                             }
-                         }
-                     } catch(e) {
-                         console.warn("Skipping file (fs error):", fileMeta.path, e);
-                         currentFileFailedRef.current = true;
-                     }
-                  }
+                  // Limit RAM buffering to < 10 MB and valid streaming API
+                  const useRamBuffer = fileMeta.size < 10 * 1024 * 1024 && useStreaming && !currentFileFailedRef.current;
                   
-                  if (writableRef.current && !currentFileFailedRef.current) {
-                     try { await writableRef.current.write(chunk); }
-                     catch(e) { console.error("Write error:", e); currentFileFailedRef.current = true; }
-                  }
-                  
-                  currentFileBytesRef.current += chunk.byteLength;
-                  updateProgressUI();
-                  if (currentFileBytesRef.current >= fileMeta.size) { // >= to be safe
-                     if (writableRef.current) {
-                        const w = writableRef.current;
-                        writableRef.current = null;
-                        if (!(window as any).__pendingCloses) (window as any).__pendingCloses = [];
-                        (window as any).__pendingCloses.push(w.close().catch(()=>{}));
-                     }
-                     currentFileFailedRef.current = false;
-                     
-                     let nextIdx = currentIdx + 1;
-                     while (nextIdx < meta.files.length) {
-                        const nMeta = meta.files[nextIdx];
-                        if (nMeta.size !== 0 && resumeMapRef.current[nextIdx] === nMeta.size) { nextIdx++; continue; }
-                        break;
-                     }
-                     
-                     currentFileIndexRef.current = nextIdx;
-                     currentFileBytesRef.current = resumeMapRef.current[nextIdx] || 0;
+                  if (useRamBuffer) {
+                      if (!(window as any).__ramBuffer) (window as any).__ramBuffer = [];
+                      (window as any).__ramBuffer.push(chunk);
+                      currentFileBytesRef.current += chunk.byteLength;
+                      updateProgressUI();
+                      
+                      if (currentFileBytesRef.current >= fileMeta.size) {
+                          const fullBlob = new Blob((window as any).__ramBuffer);
+                          (window as any).__ramBuffer = [];
+                          
+                          let nextIdx = currentIdx + 1;
+                          while (nextIdx < meta.files.length) {
+                              const nMeta = meta.files[nextIdx];
+                              if (nMeta.size !== 0 && resumeMapRef.current[nextIdx] === nMeta.size) { nextIdx++; continue; }
+                              break;
+                          }
+                          currentFileIndexRef.current = nextIdx;
+                          currentFileBytesRef.current = resumeMapRef.current[nextIdx] || 0;
+                          
+                          if (!(window as any).__activeWrites) (window as any).__activeWrites = new Set();
+                          let queueLimit = 15;
+                          if (fileMeta.size <= 1024 * 1024) queueLimit = 100; // < 1MB
+                          else if (fileMeta.size <= 5 * 1024 * 1024) queueLimit = 30; // < 5MB
+                          
+                          while ((window as any).__activeWrites.size >= queueLimit) {
+                              await Promise.race((window as any).__activeWrites).catch(()=>{});
+                          }
+                          
+                          const saveTask = (async () => {
+                             try {
+                                 if ((statusRef.current as string) === "cancelled" || !dirHandleRef.current) return;
+                                 
+                                 const pathParts = fileMeta.path.split('/');
+                                 let currentDir = dirHandleRef.current;
+                                 let cachePath = "";
+                                 
+                                 if (!(pathParts.length > 1 && pathParts[0] === capturedSession.fileName)) {
+                                     cachePath = capturedSession.fileName;
+                                     if (dirCacheRef.current.has(cachePath)) { currentDir = dirCacheRef.current.get(cachePath)!; }
+                                     else {
+                                         await ((window as any).__dirMutex = ((window as any).__dirMutex || Promise.resolve()).then(async () => {
+                                             if ((statusRef.current as string) === "cancelled" || !currentDir) return;
+                                             if (!dirCacheRef.current.has(cachePath)) {
+                                                 const d = await currentDir.getDirectoryHandle(capturedSession.fileName, { create: true });
+                                                 dirCacheRef.current.set(cachePath, d);
+                                             }
+                                         }));
+                                         if ((statusRef.current as string) === "cancelled" || !dirHandleRef.current) return;
+                                         currentDir = dirCacheRef.current.get(cachePath)!;
+                                     }
+                                 }
+                                 
+                                 for (let i = 0; i < pathParts.length - 1; i++) {
+                                     cachePath += (cachePath ? "/" : "") + pathParts[i];
+                                     if (dirCacheRef.current.has(cachePath)) { currentDir = dirCacheRef.current.get(cachePath)!; }
+                                     else {
+                                         await ((window as any).__dirMutex = ((window as any).__dirMutex || Promise.resolve()).then(async () => {
+                                             if ((statusRef.current as string) === "cancelled" || !currentDir) return;
+                                             if (!dirCacheRef.current.has(cachePath)) {
+                                                 const d = await currentDir.getDirectoryHandle(pathParts[i], { create: true });
+                                                 dirCacheRef.current.set(cachePath, d);
+                                             }
+                                         }));
+                                         if ((statusRef.current as string) === "cancelled" || !dirHandleRef.current) return;
+                                         currentDir = dirCacheRef.current.get(cachePath)!;
+                                     }
+                                 }
+                                 
+                                 const lastPart = pathParts[pathParts.length - 1];
+                                 if (lastPart !== "" && currentDir) {
+                                     const handle = await currentDir.getFileHandle(lastPart, { create: true });
+                                     const w = await handle.createWritable({ keepExistingData: false });
+                                     await w.write(await fullBlob.arrayBuffer());
+                                     await w.close();
+                                 }
+                             } catch(e) { console.error("Async write error:", e); }
+                          })();
+                          
+                          (window as any).__activeWrites.add(saveTask);
+                          saveTask.finally(() => (window as any).__activeWrites.delete(saveTask));
+                      }
+                  } else {
+                      // Fallback for large files >= 10MB (Streamed sequentially like before to preserve RAM)
+                      if (!writableRef.current && dirHandleRef.current && !currentFileFailedRef.current) {
+                         try {
+                             const pathParts = fileMeta.path.split('/');
+                             let currentDir = dirHandleRef.current;
+                             let cachePath = "";
+                             
+                             if (!(pathParts.length > 1 && pathParts[0] === capturedSession.fileName)) {
+                                 cachePath = capturedSession.fileName;
+                                 if (dirCacheRef.current.has(cachePath)) { currentDir = dirCacheRef.current.get(cachePath)!; }
+                                 else { currentDir = await currentDir.getDirectoryHandle(capturedSession.fileName, { create: true }); dirCacheRef.current.set(cachePath, currentDir); }
+                             }
+                             
+                             for (let i = 0; i < pathParts.length - 1; i++) {
+                                 cachePath += (cachePath ? "/" : "") + pathParts[i];
+                                 if (dirCacheRef.current.has(cachePath)) { currentDir = dirCacheRef.current.get(cachePath)!; }
+                                 else { currentDir = await currentDir.getDirectoryHandle(pathParts[i], { create: true }); dirCacheRef.current.set(cachePath, currentDir); }
+                             }
+                             
+                             const lastPart = pathParts[pathParts.length - 1];
+                             if (lastPart !== "") {
+                                 const handle = await currentDir.getFileHandle(lastPart, { create: true });
+                                 const existingBytes = resumeMapRef.current[currentIdx] || 0;
+                                 writableRef.current = await handle.createWritable({ keepExistingData: true });
+                                 if (existingBytes > 0) { await writableRef.current.seek(existingBytes); }
+                             }
+                         } catch(e) {
+                             console.warn("Skipping file (fs error):", fileMeta.path, e);
+                             currentFileFailedRef.current = true;
+                         }
+                      }
+                      
+                      if (writableRef.current && !currentFileFailedRef.current) {
+                         try { await writableRef.current.write(chunk); }
+                         catch(e) { console.error("Write error:", e); currentFileFailedRef.current = true; }
+                      }
+                      
+                      currentFileBytesRef.current += chunk.byteLength;
+                      updateProgressUI();
+                      
+                      if (currentFileBytesRef.current >= fileMeta.size) {
+                         if (writableRef.current) {
+                            const w = writableRef.current;
+                            writableRef.current = null;
+                            if (!(window as any).__pendingCloses) (window as any).__pendingCloses = [];
+                            (window as any).__pendingCloses.push(w.close().catch(()=>{}));
+                         }
+                         currentFileFailedRef.current = false;
+                         
+                         let nextIdx = currentIdx + 1;
+                         while (nextIdx < meta.files.length) {
+                            const nMeta = meta.files[nextIdx];
+                            if (nMeta.size !== 0 && resumeMapRef.current[nextIdx] === nMeta.size) { nextIdx++; continue; }
+                            break;
+                         }
+                         
+                         setCurrentFileStat(currentIdx + 1); // update UI count instantly
+                         currentFileIndexRef.current = nextIdx;
+                         currentFileBytesRef.current = resumeMapRef.current[nextIdx] || 0;
+                      }
                   }
                }).catch(e => { console.error("Stream sync error:", e); });
             } else {
@@ -1220,29 +1487,65 @@ function ReceiverView({ sessionId }: { sessionId: string }) {
             </div>
 
             <div className="card mb-6">
-              {/* Progress bar */}
-              <div className="w-full bg-muted rounded-full h-2 overflow-hidden mb-3">
-                <div className="h-full bg-accent transition-all duration-200" style={{ width: `${progress * 100}%` }} />
-              </div>
-              {/* Fixed-width stats — tabular-nums prevents number jitter */}
-              <div className="flex items-center text-xs font-mono gap-2" style={{ fontVariantNumeric: "tabular-nums" }}>
-                <span className="text-foreground/50 w-10 text-right shrink-0">
-                  {Math.round(progress * 100)}%
-                </span>
-                <span className="text-foreground/20">·</span>
-                <span className="text-foreground/40 w-28 text-right shrink-0">
-                  {formatBytes(receivedBytes)}
-                </span>
-                <span className="text-foreground/20">/</span>
-                <span className="text-foreground/30 w-24 shrink-0">
-                  {formatBytes(session.fileSize)}
-                </span>
-                {speed > 0 && (
-                  <span className="ml-auto text-accent/70 w-20 text-right shrink-0">
-                    ↓ {formatSpeed(speed)}
-                  </span>
-                )}
-              </div>
+              {status === "analyzing" && analyzeProgress ? (
+                 <>
+                   <div className="w-full bg-muted rounded-full h-2 overflow-hidden mb-3">
+                     <div className="h-full bg-yellow-500 transition-all duration-200" style={{ width: `${(analyzeProgress.current / analyzeProgress.total) * 100}%` }} />
+                   </div>
+                   <div className="flex items-center text-xs font-mono gap-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                     <span className="text-yellow-500/70 w-10 text-right shrink-0">
+                       {Math.round((analyzeProgress.current / analyzeProgress.total) * 100)}%
+                     </span>
+                     <span className="text-foreground/20">·</span>
+                     <span className="text-yellow-500/70 shrink-0">
+                       Vérification locale (Smart Resume) : {analyzeProgress.current} / {analyzeProgress.total} fichiers
+                     </span>
+                   </div>
+                 </>
+              ) : status === "analyzing" ? (
+                 <>
+                   <div className="w-full bg-muted rounded-full h-2 overflow-hidden mb-3">
+                     <div className="h-full bg-yellow-500/40 animate-pulse w-full" />
+                   </div>
+                   <div className="flex items-center text-xs font-mono gap-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                     <span className="text-yellow-500/70 shrink-0">
+                       Réception de l&apos;architecture du dossier en cours...
+                     </span>
+                   </div>
+                 </>
+              ) : (
+                 <>
+                   <div className="w-full bg-muted rounded-full h-2 overflow-hidden mb-3">
+                     <div className="h-full bg-accent transition-all duration-200" style={{ width: `${progress * 100}%` }} />
+                   </div>
+                   {/* Fixed-width stats — tabular-nums prevents number jitter */}
+                   <div className="flex items-center text-xs font-mono gap-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+                     <span className="text-foreground/50 w-10 text-right shrink-0">
+                       {Math.round(progress * 100)}%
+                     </span>
+                     <span className="text-foreground/20">·</span>
+                     <span className="text-foreground/40 w-28 text-right shrink-0">
+                       {formatBytes(receivedBytes)}
+                     </span>
+                     <span className="text-foreground/30 w-24 shrink-0">
+                       {formatBytes(session.fileSize)}
+                     </span>
+                     {session?.isDirectory && session.filesCount !== undefined && (
+                        <>
+                          <span className="text-foreground/20">·</span>
+                          <span className="text-foreground/40 whitespace-nowrap">
+                            {status === "done" ? session.filesCount : currentFileStat} / {session.filesCount} f.
+                          </span>
+                        </>
+                     )}
+                     {speed > 0 && (
+                       <span className="ml-auto text-accent/70 w-20 text-right shrink-0">
+                         ↓ {formatSpeed(speed)}
+                       </span>
+                     )}
+                   </div>
+                 </>
+              )}
               {streaming && status === "receiving" && (
                 <p className="text-foreground/30 text-xs mt-2">Écriture directe sur disque — aucun stockage en mémoire</p>
               )}
