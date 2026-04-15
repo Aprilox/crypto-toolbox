@@ -12,5 +12,6 @@ export async function GET(
     fileName: session.fileName,
     fileSize: session.fileSize,
     fileType: session.fileType,
+    isDirectory: session.isDirectory,
   });
 }

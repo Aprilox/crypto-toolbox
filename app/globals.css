@@ -158,6 +158,18 @@ input::placeholder, textarea::placeholder {
   box-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
 }
 
+.btn-red {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: rgb(248, 113, 113);
+}
+
+.btn-red:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgb(239, 68, 68);
+  color: rgb(248, 113, 113);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
 /* Card styles */
 .card {
   background: var(--card);

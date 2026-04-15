@@ -10,7 +10,7 @@ export async function GET(
   if (!session) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
   const slots = Array.from(session.receivers.values())
-    .filter((s) => s.status !== "done" && s.status !== "cancelled")
+    .filter((s) => s.status !== "done")
     .map((s) => ({
       receiverId: s.receiverId,
       hasOffer: s.offer !== null,

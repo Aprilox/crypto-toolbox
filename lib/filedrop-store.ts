@@ -11,6 +11,7 @@ export interface FileDropSession {
   fileName: string;
   fileSize: number;
   fileType: string;
+  isDirectory: boolean;
   receivers: Map<string, ReceiverSlot>;
   createdAt: number;
 }
